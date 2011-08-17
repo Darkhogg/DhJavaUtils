@@ -5,12 +5,13 @@ kinds of applications, that may or may not be useful for anyone but me.
 
 ## License
 
-This project is licensed under the GNU General Public License. See `COPYING` for
-more information.
+This project is licensed under the GNU General Public License version 3.
+See `COPYING` for more information.
 
 ## Contact
 
 This project is hosted on GitHub: <https://github.com/Darkhogg/DhJavaUtils>.
+
 For contacting the author, bug reporting, etc., use the above link.
 Although this is kind of a _personal library_ project, contributions are
 welcome.
