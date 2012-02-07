@@ -1,3 +1,19 @@
+/*
+ * This file is part of DhJavaUtils.
+ * 
+ * DhJavaUtils is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ * 
+ * DhJavaUtils is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with DhJavaUtils. If not, see <http://www.gnu.org/licenses/>.
+ */
 package es.darkhogg.util.concurrent;
 
 import java.io.Closeable;
@@ -22,12 +38,12 @@ public final class Pipe<E> implements Closeable {
 	/** Last node of the pipe */
 	private volatile Node<E> last = null;
 	
-	public synchronized void add ( E elem ) {
+	public synchronized void add ( final E elem ) {
 		if ( closed ) {
 			throw new IllegalStateException( "Pipe closed" );
 		}
 		
-		Node<E> node = new Node<E>( elem );
+		final Node<E> node = new Node<E>( elem );
 		
 		if ( first == null ) {
 			first = node;
@@ -37,14 +53,14 @@ public final class Pipe<E> implements Closeable {
 			last = node;
 		}
 		
-		this.notifyAll();
+		notifyAll();
 	}
 	
 	public synchronized E take () throws InterruptedException {
 		return take( -1, null );
 	}
 	
-	public synchronized E take ( long time, TimeUnit unit ) throws InterruptedException {
+	public synchronized E take ( final long time, final TimeUnit unit ) throws InterruptedException {
 		while ( first == null && !closed ) {
 			if ( time < 0 ) {
 				this.wait();
@@ -57,7 +73,7 @@ public final class Pipe<E> implements Closeable {
 			throw new IllegalStateException( "Pipe closed" );
 		}
 		
-		E elem = first.element;
+		final E elem = first.element;
 		first = first.next;
 		
 		if ( first == null ) {
@@ -80,7 +96,7 @@ public final class Pipe<E> implements Closeable {
 	@Override
 	public synchronized void close () {
 		closed = true;
-		this.notifyAll();
+		notifyAll();
 	}
 	
 	/**
@@ -105,7 +121,7 @@ public final class Pipe<E> implements Closeable {
 		 * @param element
 		 *            Element for this node
 		 */
-		public Node ( E element ) {
+		public Node ( final E element ) {
 			this.element = element;
 		}
 	}
