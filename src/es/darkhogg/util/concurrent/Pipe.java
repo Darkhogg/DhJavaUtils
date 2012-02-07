@@ -16,7 +16,6 @@
  */
 package es.darkhogg.util.concurrent;
 
-import java.io.Closeable;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -27,7 +26,7 @@ import java.util.concurrent.TimeUnit;
  * @param <E>
  *            Type of the elements of this pipe
  */
-public final class Pipe<E> implements Closeable {
+public final class Pipe<E> {
 	
 	/** Whether this pipe is closed */
 	private volatile boolean closed = false;
@@ -38,9 +37,18 @@ public final class Pipe<E> implements Closeable {
 	/** Last node of the pipe */
 	private volatile Node<E> last = null;
 	
+	/**
+	 * Adds an element to this pipe. If the pipe is closed, the element is discarded and this method throws a
+	 * {@link PipeClosedException}
+	 * 
+	 * @param elem
+	 *            Element to add
+	 * @throws PipeClosedException
+	 *             If this pipe is closed
+	 */
 	public synchronized void add ( final E elem ) {
 		if ( closed ) {
-			throw new IllegalStateException( "Pipe closed" );
+			throw new PipeClosedException( "Pipe closed" );
 		}
 		
 		final Node<E> node = new Node<E>( elem );
@@ -56,31 +64,75 @@ public final class Pipe<E> implements Closeable {
 		notifyAll();
 	}
 	
+	/**
+	 * Adds all elements retrieved from <tt>iter</tt> to this pipe. If the pipe is closed, all remaining elements are
+	 * discarded and this method throws a {@link PipeClosedException}.
+	 * <p>
+	 * Note that if the iteration is interrupted in any way, some elements might be added while others are not. This
+	 * only happens if the iterator obtained from <tt>iter</tt> throws an exception, such as
+	 * <tt>ConcurrentModificationException</tt>, in the middle of the iteration.
+	 * 
+	 * @param iter
+	 *            Iterator to retrieve elements from
+	 * @throws PipeClosedException
+	 *             If this pipe is closed
+	 */
+	public synchronized void addAll ( final Iterable<? extends E> iter ) {
+		for ( E elem : iter ) {
+			add( elem );
+		}
+	}
+	
+	/**
+	 * 
+	 * @return The next element on the pipe
+	 * @throws InterruptedException
+	 *             If the current thread is interrupted while waiting on this method
+	 * @throws PipeClosedException
+	 *             If this pipe is closed and there are no more elements to retrieve
+	 */
 	public synchronized E take () throws InterruptedException {
 		return take( -1, null );
 	}
 	
+	/**
+	 * 
+	 * @param time
+	 *            Maximum time to wait, or a negative number for an unlimited waiting time
+	 * @param unit
+	 *            Unit in which <tt>time</tt> is expressed
+	 * @return The next element on the pipe
+	 * @throws InterruptedException
+	 *             If the current thread is interrupted while waiting on this method
+	 * @throws PipeClosedException
+	 *             If this pipe is closed and there are no more elements to retrieve
+	 */
 	public synchronized E take ( final long time, final TimeUnit unit ) throws InterruptedException {
-		while ( first == null && !closed ) {
-			if ( time < 0 ) {
-				this.wait();
-			} else {
-				this.wait( unit.toMillis( time ), (int) unit.toNanos( time ) % 1000000 );
+		try {
+			while ( first == null && !closed ) {
+				if ( time < 0 ) {
+					this.wait();
+				} else {
+					this.wait( unit.toMillis( time ), (int) unit.toNanos( time ) % 1000000 );
+				}
 			}
+			
+			if ( first == null && closed ) {
+				throw new PipeClosedException( "Pipe closed" );
+			}
+			
+			final E elem = first.element;
+			first = first.next;
+			
+			if ( first == null ) {
+				last = null;
+			}
+			
+			return elem;
+		} catch ( final InterruptedException ex ) {
+			close();
+			throw ex;
 		}
-		
-		if ( first == null && closed ) {
-			throw new IllegalStateException( "Pipe closed" );
-		}
-		
-		final E elem = first.element;
-		first = first.next;
-		
-		if ( first == null ) {
-			last = null;
-		}
-		
-		return elem;
 	}
 	
 	/** @return Whether this pipe is empty */
@@ -93,7 +145,7 @@ public final class Pipe<E> implements Closeable {
 		return closed;
 	}
 	
-	@Override
+	/** Closes this pipe. */
 	public synchronized void close () {
 		closed = true;
 		notifyAll();
