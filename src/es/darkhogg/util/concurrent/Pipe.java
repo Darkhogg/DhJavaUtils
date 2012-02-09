@@ -84,6 +84,9 @@ public final class Pipe<E> {
 	}
 	
 	/**
+	 * Retrieves the next element on this pipe, or waits indefinitely until one is added. If this pipe is {@link #close
+	 * closed} while waiting or this method is called on an empty and closed pipe, a {@link PipeClosedException} is
+	 * thrown.
 	 * 
 	 * @return The next element on the pipe
 	 * @throws InterruptedException
@@ -96,6 +99,9 @@ public final class Pipe<E> {
 	}
 	
 	/**
+	 * Retrieves the next element on this pipe, or waits the maximum specified amount of time until one is added. If
+	 * this pipe is {@link #close closed} while waiting or this method is called on an empty and closed pipe, a
+	 * {@link PipeClosedException} is thrown.
 	 * 
 	 * @param time
 	 *            Maximum time to wait, or a negative number for an unlimited waiting time
