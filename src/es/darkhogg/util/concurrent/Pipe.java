@@ -16,6 +16,8 @@
  */
 package es.darkhogg.util.concurrent;
 
+import java.util.Iterator;
+import java.util.NoSuchElementException;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -26,7 +28,7 @@ import java.util.concurrent.TimeUnit;
  * @param <E>
  *            Type of the elements of this pipe
  */
-public final class Pipe<E> {
+public final class Pipe<E> implements Iterable<E> {
 	
 	/** Whether this pipe is closed */
 	private volatile boolean closed = false;
@@ -51,8 +53,10 @@ public final class Pipe<E> {
 			throw new PipeClosedException( "Pipe closed" );
 		}
 		
+		// Create the new node
 		final Node<E> node = new Node<E>( elem );
 		
+		// Add the new node
 		if ( first == null ) {
 			first = node;
 			last = node;
@@ -61,7 +65,8 @@ public final class Pipe<E> {
 			last = node;
 		}
 		
-		notifyAll();
+		// Notify one of the waiting threads, if any
+		notify();
 	}
 	
 	/**
@@ -78,7 +83,7 @@ public final class Pipe<E> {
 	 *             If this pipe is closed
 	 */
 	public synchronized void addAll ( final Iterable<? extends E> iter ) {
-		for ( E elem : iter ) {
+		for ( final E elem : iter ) {
 			add( elem );
 		}
 	}
@@ -95,50 +100,44 @@ public final class Pipe<E> {
 	 *             If this pipe is closed and there are no more elements to retrieve
 	 */
 	public synchronized E take () throws InterruptedException {
-		return take( -1, null );
+		return privTake( -1, null, true );
 	}
 	
 	/**
-	 * Retrieves the next element on this pipe, or waits the maximum specified amount of time until one is added. If
-	 * this pipe is {@link #close closed} while waiting or this method is called on an empty and closed pipe, a
-	 * {@link PipeClosedException} is thrown.
+	 * Retrieves the next element on this pipe, or waits indefinitely until one is added. If this pipe is {@link #close
+	 * closed} while waiting or this method is called on an empty and closed pipe, the <tt>hardFail</tt> method decides
+	 * what to do. If <tt>true</tt>, a {@link ClosedPipeException} is thrown. If <tt>false</tt>, <tt>null</tt> is
+	 * returned.
 	 * 
-	 * @param time
-	 *            Maximum time to wait, or a negative number for an unlimited waiting time
-	 * @param unit
-	 *            Unit in which <tt>time</tt> is expressed
+	 * @param hardFail
+	 *            <tt>true</tt> for this method to throw an exception when the pipe is closed, <tt>false</tt> to return
+	 *            <tt>null</tt>
 	 * @return The next element on the pipe
 	 * @throws InterruptedException
 	 *             If the current thread is interrupted while waiting on this method
 	 * @throws PipeClosedException
 	 *             If this pipe is closed and there are no more elements to retrieve
 	 */
+	public synchronized E take ( final boolean hardFail ) throws InterruptedException {
+		return privTake( -1, null, hardFail );
+	}
+	
 	public synchronized E take ( final long time, final TimeUnit unit ) throws InterruptedException {
-		try {
-			while ( first == null && !closed ) {
-				if ( time < 0 ) {
-					this.wait();
-				} else {
-					this.wait( unit.toMillis( time ), (int) unit.toNanos( time ) % 1000000 );
-				}
-			}
-			
-			if ( first == null && closed ) {
-				throw new PipeClosedException( "Pipe closed" );
-			}
-			
-			final E elem = first.element;
-			first = first.next;
-			
-			if ( first == null ) {
-				last = null;
-			}
-			
-			return elem;
-		} catch ( final InterruptedException ex ) {
-			close();
-			throw ex;
+		if ( time < 0 ) {
+			throw new IllegalArgumentException( "Negative time (" + time + ")" );
 		}
+		
+		return privTake( time, unit, true );
+	}
+	
+	public synchronized E take ( final long time, final TimeUnit unit, final boolean hardFail )
+		throws InterruptedException
+	{
+		if ( time < 0 ) {
+			throw new IllegalArgumentException( "Negative time (" + time + ")" );
+		}
+		
+		return privTake( time, unit, hardFail );
 	}
 	
 	/** @return Whether this pipe is empty */
@@ -157,11 +156,96 @@ public final class Pipe<E> {
 		notifyAll();
 	}
 	
+	@Override
+	public synchronized Iterator<E> iterator () {
+		return new NodeIterator<>( first );
+	}
+	
+	@Override
+	public String toString () {
+		final StringBuilder sb = new StringBuilder( "Pipe[" );
+		
+		Node<E> node = first;
+		while ( node != null ) {
+			sb.append( node.element );
+			node = node.next;
+			
+			if ( node != null ) {
+				sb.append( ", " );
+			}
+		}
+		
+		return sb.append( "]" ).toString();
+	}
+	
+	/**
+	 * @param time
+	 *            Total time to wait. Negative for unlimited waiting.
+	 * @param unit
+	 *            Time unit of the previous parameter
+	 * @param exception
+	 *            Whether to throw an exception if the pipe is closed.
+	 * @return The next element on the pipe, or <tt>null</tt> if none.
+	 * @throws InterruptedException
+	 *             If the current thread is interrupted while waiting
+	 * @throws PipeClosedException
+	 *             If the pipe is closed, there's no more elements on the pipe and <tt>exception</tt> is <tt>true</tt>
+	 */
+	private synchronized E privTake ( final long time, final TimeUnit unit, final boolean exception )
+		throws InterruptedException
+	{
+		try {
+			// Wait for elements to arrive
+			if ( first == null && !closed ) {
+				if ( time < 0 ) {
+					// Unbounded waiting
+					this.wait();
+				} else {
+					// Bounded waiting
+					unit.timedWait( this, time );
+				}
+			}
+			
+			// If there are no more elements...
+			if ( first == null ) {
+				if ( closed ) {
+					// If the pipe is closed...
+					if ( exception ) {
+						throw new PipeClosedException( "Pipe closed" );
+					} else {
+						return null;
+					}
+				} else {
+					// If the thread finished waitings...
+					if ( exception ) {
+						throw new PipeTimeoutException( "Timeout" );
+					} else {
+						return null;
+					}
+				}
+			}
+			
+			// Take the first element
+			final E elem = first.element;
+			first = first.next;
+			
+			if ( first == null ) {
+				last = null;
+			}
+			
+			// Return it
+			return elem;
+			
+		} catch ( final InterruptedException ex ) {
+			close();
+			throw ex;
+		}
+	}
+	
 	/**
 	 * A node of a linked list
 	 * 
 	 * @author Daniel Escoz
-	 * @version 1.0
 	 * @param <E>
 	 *            Type of the elements
 	 */
@@ -184,4 +268,46 @@ public final class Pipe<E> {
 		}
 	}
 	
+	/**
+	 * An iterator over nodes of a linked list
+	 * 
+	 * @author Daniel Escoz
+	 * @param <E>
+	 *            Type of the elements
+	 */
+	private static final class NodeIterator<E> implements Iterator<E> {
+		
+		/** The next node */
+		private Node<E> node;
+		
+		/**
+		 * @param node
+		 *            Initial node of the iteration
+		 */
+		public NodeIterator ( final Node<E> node ) {
+			this.node = node;
+		}
+		
+		@Override
+		public boolean hasNext () {
+			return node != null;
+		}
+		
+		@Override
+		public E next () {
+			if ( !hasNext() ) {
+				throw new NoSuchElementException();
+			}
+			
+			final E elem = node.element;
+			node = node.next;
+			return elem;
+		}
+		
+		@Override
+		public void remove () {
+			throw new UnsupportedOperationException();
+		}
+		
+	}
 }
